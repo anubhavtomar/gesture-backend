@@ -66,7 +66,6 @@ def decode(filename):
         sys.exit(1)
 
     try:
-#        pdb.set_trace()
         with audioread.audio_open(os.path.join("decoded-input/" , filename)) as f:
             print('Input file: %i channels at %i Hz; %.1f seconds.' %
                   (f.channels, f.samplerate, f.duration),
@@ -120,7 +119,6 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
 # =============================================================================
 @app.route('/predict', methods=["POST"])
 def predict_image():
-#        pdb.set_trace()
         # Preprocess the image so that it matches the training input
         print("\n\n=============================================================================")
         print("----------Prediction Start---------")
@@ -143,13 +141,13 @@ def predict_image():
         
         audio.save(os.path.join('decoded-input/', filename))
         
+        # Preprocess the image so that it matches the training input
         response = process_audio(filename)
         print(response)
         if(response['success']):            
             image = Image.open(response['fileName'])
             print("----------Image Read Successful---------")
             image = np.asarray(image.resize((128,128)))
-            
             image = image.reshape(1,128,128,3)
             print("----------Image Resize Successful---------")
             # Use the loaded model to generate a prediction.
@@ -180,35 +178,31 @@ def predict_image():
 # Process input audio and creates a spectrogram
 # =============================================================================
 def process_audio(inputAudio):
-        # Preprocess the image so that it matches the training input
         print("\n\n=============================================================================")
         print("----------Processing Start---------")
-
-
-#       decode(os.path.join("../../audio-recording-input/" , file))
-#       pdb.set_trace()
-        decode(inputAudio)                
-        #Fetch WAV Audio
-        directSig = wave.open('no-obstacle.aac.wav','r')
-         
-        directSig = directSig.readframes(-1)
-        directSig = np.fromstring(directSig, 'Int16')
-                        
+        # Set Sampling, lower cutoff, higher cutoff Frequencies
         fs = 48e3
         lowcut = 20000.0
         highcut = 22000.0
         
+        decode(inputAudio)                
+        # Direct WAV Audio Processing
+        directSig = wave.open('no-obstacle.aac.wav','r')
+        directSig = directSig.readframes(-1)
+        directSig = np.fromstring(directSig, 'Int16')
         directSigFiltered = butter_bandpass_filter(directSig, lowcut, highcut, fs, order=6)
         
+        # Test WAV Audio Processing
         testSig = wave.open(os.path.join("decoded-input/" , inputAudio) + '.wav','r')
-        
         testSig = testSig.readframes(-1)
         testSig = np.fromstring(testSig, 'Int16')                
-        
         testSigFiltered = butter_bandpass_filter(testSig, lowcut, highcut, fs, order=6)
-                        
+        
+        # Cross Correlation of Test Signal w.r.t Direct Signal
         correlated = signal.correlate(testSigFiltered, directSigFiltered, mode='same')
+        
         fig = plt.figure(1)
+        # Plot Spectrogram of Correlated Signal
         Pxx, freqs, bins, im = plt.specgram(correlated, NFFT=128, Fs=fs, 
                                             window=np.hanning(128), 
                                             noverlap=127)
@@ -217,12 +211,15 @@ def process_audio(inputAudio):
         plt.ylabel('Frequency [Hz]')
         plt.xlabel('Time [sec]')
 
+        # Save the Plot of Spectrogram of Correlated Signal
         fig.savefig(os.path.join('spectrograms/' , inputAudio) + '-spectrogram.jpg' , dpi=128)
 
 
 
         print("----------Processing Done---------")
         print("=============================================================================")
+        
+        # Return Parameters
         result = {
             'fileName' : os.path.join('spectrograms/' , inputAudio) + '-spectrogram.jpg',
             'success' : True
