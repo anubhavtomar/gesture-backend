@@ -103,5 +103,5 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-/decoded-input/
-/spectrograms/
+/api/decoded-input/
+/api/spectrograms/
