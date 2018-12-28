@@ -49,18 +49,18 @@ from flask_cors import CORS, cross_origin
 
 app = Flask(__name__)
 CORS(app)
-app.config["DEBUG"] = True
+#app.config["DEBUG"] = True
 
 # =============================================================================
 # Load Saved CNN Model
 # =============================================================================
-model = load_model('python_model.h5')
+model = load_model('phase3_model.h5')
 model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 graph = tf.get_default_graph()
 
 classHash = {
-    0 : 'Open First',
-    1 : 'Close Fist'
+    0 : 'Open Fist',
+    1 : 'Closed Fist'
 }
 
 
@@ -149,11 +149,11 @@ def process_audio(inputAudio, isCollect):
         testSigFiltered = butter_bandpass_filter(testSig, lowcut, highcut, fs, order=6)
         
         # Cross Correlation of Test Signal w.r.t Direct Signal
-        correlated = signal.correlate(testSigFiltered, directSigFiltered, mode='same')
+        correlated = signal.correlate(testSigFiltered, directSig, mode='same')
         
         fig = plt.figure(1)
         # Plot Spectrogram of Correlated Signal
-        Pxx, freqs, bins, im = plt.specgram(correlated, NFFT=128, Fs=fs, 
+        Pxx, freqs, bins, im = plt.specgram(correlated, NFFT=128, Fs=1000, 
                                             window=np.hanning(128), 
                                             noverlap=127)
         
@@ -162,7 +162,7 @@ def process_audio(inputAudio, isCollect):
         plt.xlabel('Time [sec]')
 
         # Save the Plot of Spectrogram of Correlated Signal
-        fig.savefig(os.path.join('collected-spectrograms/' if isCollect else 'spectrograms/' , inputAudio) + '-spectrogram.jpg' , dpi=128)
+        fig.savefig(os.path.join('collected-spectrograms/' if isCollect else 'spectrograms/' , inputAudio) + '-spectrogram.jpg' , dpi=1024)
 
 
 
@@ -279,4 +279,4 @@ def testing():
 
 
 if __name__ == "__main__":
-        app.run(host='172.24.21.173')
+        app.run(host='10.1.203.241')
