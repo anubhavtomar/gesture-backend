@@ -40,18 +40,27 @@ import matplotlib.pyplot as plt
 import wave
 from scipy.signal import butter, lfilter
 from scipy import signal
+import calendar;
+import time;
 
 from werkzeug.utils import secure_filename
 
-app = Flask(__name__)
+from flask_cors import CORS, cross_origin
 
-model = load_model('python_model.h5')
+app = Flask(__name__)
+CORS(app)
+#app.config["DEBUG"] = True
+
+# =============================================================================
+# Load Saved CNN Model
+# =============================================================================
+model = load_model('phase3_model.h5')
 model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 graph = tf.get_default_graph()
 
 classHash = {
-    0 : 'Sitting',
-    1 : 'Standing'
+    0 : 'Open Fist',
+    1 : 'Closed Fist'
 }
 
 
@@ -59,21 +68,21 @@ classHash = {
 # Decode .AAC Audio into .WAV Audio File
 # filename => input .aac audio file
 # =============================================================================
-def decode(filename):
+def decode(filename, isCollect):
 #    filename = os.path.abspath(os.path.expanduser(filename))
     if not filename:
         print("File not found.", file=sys.stderr)
         sys.exit(1)
 
     try:
-        with audioread.audio_open(os.path.join("decoded-input/" , filename)) as f:
+        with audioread.audio_open(os.path.join("collected-sample/" if isCollect else "decoded-input/" , filename)) as f:
             print('Input file: %i channels at %i Hz; %.1f seconds.' %
                   (f.channels, f.samplerate, f.duration),
                   file=sys.stderr)
             print('Backend:', str(type(f).__module__).split('.')[1],
                   file=sys.stderr)
             filename = filename.split('/')
-            newFileName = os.path.join("decoded-input/" , filename[-1])
+            newFileName = os.path.join("collected-sample/" if isCollect else "decoded-input/" , filename[-1])
             with contextlib.closing(wave.open(newFileName + '.wav', 'w')) as of:
                 of.setnchannels(f.channels)
                 of.setframerate(f.samplerate)
@@ -88,6 +97,7 @@ def decode(filename):
 # =============================================================================
 # End
 # =============================================================================
+     
         
 # =============================================================================
 # Butter Band Pass Filter 
@@ -115,10 +125,66 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
 
 
 # =============================================================================
-# Post API for predicting the gesture corresponding to the input .aac audio file
+# Process input audio and creates a spectrogram
+# =============================================================================
+def process_audio(inputAudio, isCollect):
+        print("\n\n=============================================================================")
+        print("----------Processing Start---------")
+        # Set Sampling, lower cutoff, higher cutoff Frequencies
+        fs = 48e3
+        lowcut = 20000.0
+        highcut = 22000.0
+        
+        decode(inputAudio, isCollect)                
+        # Direct WAV Audio Processing
+        directSig = wave.open('no-obstacle.aac.wav','r')
+        directSig = directSig.readframes(-1)
+        directSig = np.fromstring(directSig, 'Int16')
+        directSigFiltered = butter_bandpass_filter(directSig, lowcut, highcut, fs, order=6)
+        
+        # Test WAV Audio Processing
+        testSig = wave.open(os.path.join("collected-sample/" if isCollect else "decoded-input/", inputAudio) + '.wav','r')
+        testSig = testSig.readframes(-1)
+        testSig = np.fromstring(testSig, 'Int16')                
+        testSigFiltered = butter_bandpass_filter(testSig, lowcut, highcut, fs, order=6)
+        
+        # Cross Correlation of Test Signal w.r.t Direct Signal
+        correlated = signal.correlate(testSigFiltered, directSig, mode='same')
+        
+        fig = plt.figure(1)
+        # Plot Spectrogram of Correlated Signal
+        Pxx, freqs, bins, im = plt.specgram(correlated, NFFT=128, Fs=1000, 
+                                            window=np.hanning(128), 
+                                            noverlap=127)
+        
+        plt.title('Spectrogram of Correlated Signal')
+        plt.ylabel('Frequency [Hz]')
+        plt.xlabel('Time [sec]')
+
+        # Save the Plot of Spectrogram of Correlated Signal
+        fig.savefig(os.path.join('collected-spectrograms/' if isCollect else 'spectrograms/' , inputAudio) + '-spectrogram.jpg' , dpi=1024)
+
+
+
+        print("----------Processing Done---------")
+        print("=============================================================================")
+        
+        # Return Parameters
+        result = {
+            'fileName' : os.path.join('collected-spectrograms/' if isCollect else 'spectrograms/' , inputAudio) + '-spectrogram.jpg',
+            'success' : True
+        }
+        return result
+# =============================================================================
+# End
+# =============================================================================
+
+
+# =============================================================================
+# POST API for predicting the gesture corresponding to the input .aac audio file
 # =============================================================================
 @app.route('/predict', methods=["POST"])
-def predict_image():
+def predict_gesture():
         # Preprocess the image so that it matches the training input
         print("\n\n=============================================================================")
         print("----------Prediction Start---------")
@@ -126,23 +192,14 @@ def predict_image():
 #        audio = audio['audio']
         audio = request.files['audio']
         print("Audio name : ")
-        filename = secure_filename(audio.filename)
+        ts = calendar.timegm(time.gmtime())
+        filename = secure_filename("sample-" + str(ts) + "-" +audio.filename)
         print(filename)
         print(audio)
-        
-        for file in os.listdir("decoded-input"):
-            if file.endswith((".wav" , ".aac")):
-                os.remove(os.path.join("decoded-input/" , file))
-            
-        for file in os.listdir("spectrograms"):
-            if file.endswith(".jpg"):
-                os.remove(os.path.join("spectrograms/" , file))
-        
-        
-        audio.save(os.path.join('decoded-input/', filename))
-        
+                
+        audio.save(os.path.join('decoded-input/', filename))  
         # Preprocess the image so that it matches the training input
-        response = process_audio(filename)
+        response = process_audio(filename, False)
         print(response)
         if(response['success']):            
             image = Image.open(response['fileName'])
@@ -154,7 +211,6 @@ def predict_image():
             global graph
             with graph.as_default():
                 pred = model.predict_classes(image)
-    
             # Prepare and send the response.
             print("Preditions Output")
             print(pred)
@@ -171,60 +227,56 @@ def predict_image():
         return jsonify(prediction)
 # =============================================================================
 # End
-# =============================================================================
+# =============================================================================    
     
     
 # =============================================================================
-# Process input audio and creates a spectrogram
+# POST API for uploading the sample input .aac audio file
 # =============================================================================
-def process_audio(inputAudio):
+@app.route('/audio-uploader', methods=["POST"])
+def upload_audio():
+        # Preprocess the image so that it matches the training input
         print("\n\n=============================================================================")
-        print("----------Processing Start---------")
-        # Set Sampling, lower cutoff, higher cutoff Frequencies
-        fs = 48e3
-        lowcut = 20000.0
-        highcut = 22000.0
-        
-        decode(inputAudio)                
-        # Direct WAV Audio Processing
-        directSig = wave.open('no-obstacle.aac.wav','r')
-        directSig = directSig.readframes(-1)
-        directSig = np.fromstring(directSig, 'Int16')
-        directSigFiltered = butter_bandpass_filter(directSig, lowcut, highcut, fs, order=6)
-        
-        # Test WAV Audio Processing
-        testSig = wave.open(os.path.join("decoded-input/" , inputAudio) + '.wav','r')
-        testSig = testSig.readframes(-1)
-        testSig = np.fromstring(testSig, 'Int16')                
-        testSigFiltered = butter_bandpass_filter(testSig, lowcut, highcut, fs, order=6)
-        
-        # Cross Correlation of Test Signal w.r.t Direct Signal
-        correlated = signal.correlate(testSigFiltered, directSigFiltered, mode='same')
-        
-        fig = plt.figure(1)
-        # Plot Spectrogram of Correlated Signal
-        Pxx, freqs, bins, im = plt.specgram(correlated, NFFT=128, Fs=fs, 
-                                            window=np.hanning(128), 
-                                            noverlap=127)
-        
-        plt.title('Spectrogram of Correlated Signal')
-        plt.ylabel('Frequency [Hz]')
-        plt.xlabel('Time [sec]')
-
-        # Save the Plot of Spectrogram of Correlated Signal
-        fig.savefig(os.path.join('spectrograms/' , inputAudio) + '-spectrogram.jpg' , dpi=128)
-
-
-
-        print("----------Processing Done---------")
+        print("----------Upload Start---------")
+        audio = request.files['audio']
+        print("Audio name : ")
+        ts = calendar.timegm(time.gmtime())
+        filename = secure_filename("sample-" + str(ts) + "-" +audio.filename)
+        print(filename)
+        print(audio)
+        try:
+            audio.save(os.path.join('collected-sample/', filename))
+            response = process_audio(filename, True)
+        except:
+            response = {
+                    'success' : False
+                    }
+        print("----------Upload Done---------")
         print("=============================================================================")
+        return jsonify(response)
+# =============================================================================
+# End
+# =============================================================================
+       
         
-        # Return Parameters
-        result = {
-            'fileName' : os.path.join('spectrograms/' , inputAudio) + '-spectrogram.jpg',
-            'success' : True
-        }
-        return result
+# =============================================================================
+# Test API 
+# =============================================================================
+@app.route('/testing', methods=["GET"])
+def testing():
+        # Preprocess the image so that it matches the training input
+        print("\n\n=============================================================================")
+        print("----------Test Start---------")
+        response = {
+                'success' : True
+                }
+        print("----------Test Done---------")
+        print("=============================================================================")
+        return jsonify(response)
+# =============================================================================
+# End
+# =============================================================================
+
 
 if __name__ == "__main__":
-        app.run()
+        app.run(host='10.1.203.241')
